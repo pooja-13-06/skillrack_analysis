@@ -36,12 +36,12 @@ def write_formatted_sheet(workbook, worksheet, final_df, detected_date_str, year
     worksheet.merge_range('A4:A5', "Branch", header_fmt)
     worksheet.merge_range('B4:B5', "Year", header_fmt)
     worksheet.merge_range('C4:E4', "Student Strength Details", header_fmt)
-    worksheet.merge_range('F4:F5', "Zero\nProblems\nSolved", header_fmt)
-    worksheet.merge_range('G4:I4', "No of Problems Solved", header_fmt)
+    worksheet.merge_range('F4:I4', "No of Problems Solved", header_fmt)
     
     worksheet.write('C5', "Registered", header_fmt)
     worksheet.write('D5', "Appeared", header_fmt)
     worksheet.write('E5', "Absent", header_fmt)
+    worksheet.write('F5', "Zero", header_fmt)
     worksheet.write('G5', "One", header_fmt)
     worksheet.write('H5', "Two", header_fmt)
     worksheet.write('I5', "Three", header_fmt)
@@ -176,8 +176,8 @@ def normalize_year_val(val):
     if 'FIRST' in val or '1ST' in val: return 'I'
     if 'FOURTH' in val or '4TH' in val: return 'IV'
     if '2028' in val: return 'II'
-    if '2027' in val: return 'CITAR-III'
-    if 'citar' in val: return 'CITAR-III'
+    if '2027' in val: return 'III'  # Regular III year
+    if 'CITAR' in val: return 'CITAR-III'
     
     if re.search(r'\bII\b', val): return 'II'
     if re.search(r'\bIII\b', val): return 'III'
@@ -189,7 +189,7 @@ def normalize_year_val(val):
             if d == '1': return 'I'
             if d == '2': return 'II'
             if d == '3': return 'III'
-            if d == '4': return 'CITAR-III'
+            if d == '4': return 'IV'
     return val
 
 st.set_page_config(page_title="Result Analysis Tool", layout="wide")
