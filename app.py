@@ -101,6 +101,122 @@ def write_formatted_sheet(workbook, worksheet, final_df, detected_date_str, year
     worksheet.set_column('B:B', 15) 
     worksheet.set_column('C:I', 15)
 
+def write_student_rankings(workbook, worksheet, student_df, top_n, start_row_offset):
+    """
+    Write student performance rankings to the worksheet below the summary.
+    Returns the number of rows written.
+    """
+    if student_df.empty:
+        return 0
+    
+    # Formats
+    section_header_fmt = workbook.add_format({
+        'bold': True, 'font_size': 12, 'bg_color': '#4472C4', 
+        'font_color': 'white', 'align': 'center', 'valign': 'vcenter', 'border': 1
+    })
+    perf_header_fmt = workbook.add_format({
+        'bold': True, 'bg_color': '#B4C7E7', 'border': 1, 
+        'align': 'center', 'valign': 'vcenter'
+    })
+    rank_fmt = workbook.add_format({
+        'align': 'center', 'valign': 'vcenter', 'border': 1, 'bold': True
+    })
+    data_fmt = workbook.add_format({
+        'align': 'center', 'valign': 'vcenter', 'border': 1
+    })
+    gold_fmt = workbook.add_format({
+        'align': 'center', 'valign': 'vcenter', 'border': 1, 
+        'bg_color': '#FFD700', 'bold': True
+    })
+    silver_fmt = workbook.add_format({
+        'align': 'center', 'valign': 'vcenter', 'border': 1, 
+        'bg_color': '#C0C0C0', 'bold': True
+    })
+    bronze_fmt = workbook.add_format({
+        'align': 'center', 'valign': 'vcenter', 'border': 1, 
+        'bg_color': '#CD7F32', 'bold': True
+    })
+    
+    def get_rank_fmt(rank):
+        if rank == 1: return gold_fmt
+        if rank == 2: return silver_fmt
+        if rank == 3: return bronze_fmt
+        return rank_fmt
+
+    def safe_get(row_data, col, default='N/A'):
+        """Safely get a value from a pandas Series by column name."""
+        return row_data[col] if col in row_data.index else default
+
+    def write_student_row(ws, row_idx, rank, row_data):
+        ws.write(row_idx, 0, rank, get_rank_fmt(rank))
+        ws.write(row_idx, 1, str(safe_get(row_data, 'Reg No')), data_fmt)
+        ws.write(row_idx, 2, str(safe_get(row_data, 'Name')), data_fmt)
+        ws.write(row_idx, 3, str(safe_get(row_data, 'Branch')), data_fmt)
+        ws.write(row_idx, 4, str(safe_get(row_data, 'Year')), data_fmt)
+        ws.write(row_idx, 5, int(safe_get(row_data, 'Solved count', 0)), data_fmt)
+        ws.write(row_idx, 6, int(safe_get(row_data, 'Total submissions', 0)), data_fmt)
+        ws.write(row_idx, 7, str(safe_get(row_data, 'Active utilisation')), data_fmt)
+
+    # Make a clean copy and convert numeric columns safely
+    df = student_df.copy()
+    df['Solved count'] = pd.to_numeric(df['Solved count'], errors='coerce').fillna(0)
+    df['Total submissions'] = pd.to_numeric(df['Total submissions'], errors='coerce').fillna(0)
+    # Convert Active utilisation to numeric for sorting (non-numeric becomes 0)
+    # Convert Active utilisation to numeric for sorting (non-numeric becomes 0)
+    def parse_duration_to_seconds(val):
+        if pd.isna(val): return 99999999 # Treat NaNs as very large time (bottom of list)
+        val = str(val).strip()
+        try:
+            # Handle HH:MM:SS
+            parts = list(map(int, val.split(':')))
+            if len(parts) == 3:
+                return parts[0] * 3600 + parts[1] * 60 + parts[2]
+            elif len(parts) == 2:
+                return parts[0] * 60 + parts[1]
+            else:
+                return 99999999
+        except:
+             return 99999999
+
+    df['Active utilisation_seconds'] = df['Active utilisation'].apply(parse_duration_to_seconds)
+    
+    headers = ["Rank", "Reg No", "Name", "Branch", "Year", "Problems Solved", "Submissions", "Active Util"]
+    current_row = start_row_offset
+    
+    def write_section(ws, section_df, title, start):
+        row = start
+        ws.merge_range(row, 0, row, 7, title, section_header_fmt)
+        row += 1
+        for col, header in enumerate(headers):
+            ws.write(row, col, header, perf_header_fmt)
+        row += 1
+        ranked = section_df.sort_values(
+            by=['Solved count', 'Active utilisation_seconds', 'Total submissions'],
+            ascending=[False, True, True]
+        ).head(top_n).reset_index(drop=True)
+        for idx, r in ranked.iterrows():
+            write_student_row(ws, row, idx + 1, r)
+            row += 1
+        return row + 2  # gap
+
+    # --- OVERALL ---
+    current_row = write_section(worksheet, df, "OVERALL TOP PERFORMERS", current_row)
+    
+    # --- BRANCH-WISE ---
+    for branch in sorted(df['Branch'].unique()):
+        branch_df = df[df['Branch'] == branch]
+        current_row = write_section(worksheet, branch_df, f"{branch} - TOP PERFORMERS", current_row)
+    
+    # Set column widths
+    worksheet.set_column('A:A', 8)
+    worksheet.set_column('B:B', 18)
+    worksheet.set_column('C:C', 25)
+    worksheet.set_column('D:D', 12)
+    worksheet.set_column('E:E', 10)
+    worksheet.set_column('F:H', 15)
+    
+    return current_row - start_row_offset
+
 def extract_date_from_val(val):
     """Isolates the date part from a string using regex and validates with pd.to_datetime."""
     if pd.isna(val) or str(val).lower() in ['nan', 'n/a', '', 'none']:
@@ -241,6 +357,7 @@ with tab1:
     st.write("### Upload File(s)")
     uploaded_files = st.file_uploader("Upload 'Result/Usage' Files (for Appeared Count)", type=["xlsx", "xls", "csv"], key="res", accept_multiple_files=True)
 
+
     # --- STATIC DATA (HARDCODED) ---
     STATIC_STRENGTH = [
         # Second Year (II)
@@ -292,6 +409,61 @@ with tab1:
             seen_names = set()
             processed_files_names = []
 
+            # Column Mapping Definition
+            res_col_map = {
+                'Reg No': ['regn num', 'regn no', 'reg no', 'registration number', 'regn_no', 'roll no', 'reg_no', 'student id', 'roll number', 'student registration id', 'reg_id', 'id', 'student_id'],
+                'Branch': ['branch', 'department', 'dept', 'branch name', 'major', 'discipline'],
+                'Year': ['year', 'yr', 'batch', 'year of study', 'study year', 'academic year', 'standard'],
+                'Solved count': ['solved count', 'problems solved', 'total solved', 'problems count', 'solved'],
+                'Total submissions': ['total submissions', 'total attempts', 'submission count'],
+                'Active utilisation': ['active utilisation', 'active utilization', 'active status'],
+                'Name': ['name', 'student name', 'full name', 'student_name', 'fullname'],
+                'Timestamp': [
+                    'timestamp', 'date', 'uploaded at', 'time', 'usage date', 'usage time', 
+                    'last login', 'completion date', 'date/time', 'login time', 'submitted on', 
+                    'test date', 'created at', 'start time'
+                ]
+            }
+
+            def standardize_columns(df):
+                """Standardize column names for a single dataframe, handling collisions."""
+                df.columns = df.columns.str.strip()
+                
+                # Apply mapping
+                for standard, variations in res_col_map.items():
+                    # Find all columns that match this standard key (including itself)
+                    candidates = []
+                    for col in df.columns:
+                        if col.lower() in variations or col.lower() == standard.lower():
+                            candidates.append(col)
+                    
+                    if not candidates:
+                        continue
+                        
+                    # If multiple candidates exist (e.g. 'Reg No' is empty, 'Regn No' is full), pick the best one
+                    best_col = candidates[0]
+                    if len(candidates) > 1:
+                        # Pick the one with the most non-null values
+                        best_col = max(candidates, key=lambda c: df[c].count())
+                    
+                    # Rename the best candidate to standard
+                    if best_col != standard:
+                         df.rename(columns={best_col: standard}, inplace=True)
+                    
+                    # Drop other candidates to avoid confusion (if they still exist after rename)
+                    other_candidates = [c for c in candidates if c != best_col and c in df.columns]
+                    if other_candidates:
+                        df.drop(columns=other_candidates, inplace=True)
+
+                # Fallback for Reg No specifically if missed - GREEDY SEARCH
+                if 'Reg No' not in df.columns:
+                    col_map = {c.lower().strip(): c for c in df.columns}
+                    for norm_col, orig_col in col_map.items():
+                        if 'reg' in norm_col and 'no' in norm_col:
+                            df.rename(columns={orig_col: 'Reg No'}, inplace=True)
+                            break
+                return df
+
             for res_file in uploaded_files:
                 if res_file.name in seen_names:
                     st.warning(f"⚠️ duplicate file skipped: {res_file.name}")
@@ -305,8 +477,10 @@ with tab1:
                 else:
                     df = pd.read_excel(res_file)
                 
-                # Tag with source filename for CITAR detection
+                # Tag with source filename and standardize columns IMMEDIATELY
                 df['Source_Filename'] = res_file.name.lower()
+                df = standardize_columns(df)
+                
                 all_dfs.append(df)
             
             if not all_dfs:
@@ -314,27 +488,8 @@ with tab1:
 
             # Concatenate all inputs
             df_res = pd.concat(all_dfs, ignore_index=True)
-
-            # Res Column Mapping
-            df_res.columns = df_res.columns.str.strip() 
-            res_col_map = {
-                'Branch': ['branch', 'department', 'dept', 'branch name', 'major', 'discipline'],
-                'Year': ['year', 'yr', 'batch', 'year of study', 'study year', 'academic year', 'standard'],
-                'Solved count': ['solved count', 'problems solved', 'total solved', 'problems count', 'solved'],
-                'Total submissions': ['total submissions', 'total attempts', 'submission count'],
-                'Active utilisation': ['active utilisation', 'active utilization', 'active status'],
-                'Reg No': ['registration number', 'reg no', 'roll no', 'reg_no', 'student id', 'roll number', 'student registration id', 'reg_id', 'id', 'student_id'],
-                'Timestamp': [
-                    'timestamp', 'date', 'uploaded at', 'time', 'usage date', 'usage time', 
-                    'last login', 'completion date', 'date/time', 'login time', 'submitted on', 
-                    'test date', 'created at', 'start time'
-                ]
-            }
-            for standard, variations in res_col_map.items():
-                for col in df_res.columns:
-                    if col.lower() in variations or col.lower() == standard.lower():
-                        df_res.rename(columns={col: standard}, inplace=True)
-                        break 
+            
+            # --- OLD MAPPING LOGIC REMOVED FROM HERE ---
             
             required_cols = ['Branch', 'Year', 'Solved count']
             missing = [col for col in required_cols if col not in df_res.columns]
@@ -457,7 +612,19 @@ with tab1:
                     res_df = generate_report_df(d_str, d_rows)
                     if res_df.empty: continue
                     u_yrs = sorted(list(set([r['Year'] for r in d_rows])))
-                    report_obj = {"date": d_str, "df": res_df, "years_text": ", ".join(u_yrs), "is_current": True}
+                    
+                    # Extract student-level data for this date
+                    student_data = df_res[df_res['Derived_Date'] == d_str].copy()
+                    student_data['Branch'] = student_data['Branch'].apply(normalize_branch)
+                    student_data['Year'] = student_data['Year'].astype(str).replace(r'\.0$', '', regex=True).apply(normalize_year_val)
+                    student_data['Solved count'] = pd.to_numeric(student_data['Solved count'], errors='coerce').fillna(0).astype(int)
+                    student_data['Total submissions'] = pd.to_numeric(student_data['Total submissions'], errors='coerce').fillna(0).astype(int)
+                    if 'Active utilisation' not in student_data.columns:
+                        student_data['Active utilisation'] = 'N/A'
+                    else:
+                        student_data['Active utilisation'] = student_data['Active utilisation'].fillna('N/A')
+                    
+                    report_obj = {"date": d_str, "df": res_df, "years_text": ", ".join(u_yrs), "is_current": True, "student_data": student_data}
                     all_final_reports.append(report_obj)
                     
                     # Save to DB (Strictly new data for this session)
@@ -476,16 +643,16 @@ with tab1:
                         res_df = generate_report_df(d_str, d_rows)
                         if res_df.empty: continue
                         u_yrs = sorted(list(set([r['Year'] for r in d_rows])))
-                        all_final_reports.append({"date": d_str, "df": res_df, "years_text": ", ".join(u_yrs), "is_current": False})
+                        all_final_reports.append({"date": d_str, "df": res_df, "years_text": ", ".join(u_yrs), "is_current": False, "student_data": pd.DataFrame()})
                     
 
                 # --- UI DISPLAY ---
-                for rep in all_final_reports:
-                    if rep['is_current']:
-                        st.subheader(f"Generated Analysis Report - Date: {rep['date']}")
-                        st.dataframe(rep['df'])
+                # for rep in all_final_reports:
+                #     if rep['is_current']:
+                #         st.subheader(f"Generated Analysis Report - Date: {rep['date']}")
+                #         st.dataframe(rep['df'])
                 
-                # --- EXCEL GENERATION (All Dates, Chronological) ---
+                
                 st.write("### Export Options")
                 def sort_rep(r):
                     try: return datetime.strptime(r['date'], "%d-%m-%Y")
@@ -505,10 +672,90 @@ with tab1:
                 curr_ds = sorted(list(set([r['date'] for r in all_final_reports if r['is_current']])))
                 fn_dt = "_".join(curr_ds).replace("/", "-") if curr_ds else datetime.now().strftime('%d-%m-%Y')
 
-                st.download_button(label="Download Analysis Report", data=output.getvalue(), file_name=f"Skill_Rack_Analysis_{fn_dt}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.download_button(
+                        label="📥 Download Analysis Report",
+                        data=output.getvalue(),
+                        file_name=f"Skill_Rack_Analysis_{fn_dt}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    )
+                with col2:
+                    if st.button("🏆 Generate Performance Analysis"):
+                        st.session_state['show_perf_input'] = True
+                    
+                    if st.session_state.get('show_perf_input', False):
+                        # Extract all available departments from current reports
+                        available_depts = set()
+                        for rep in all_final_reports:
+                            if rep['is_current'] and not rep.get('student_data', pd.DataFrame()).empty:
+                                available_depts.update(rep['student_data']['Branch'].unique())
+                        
+                        available_depts = sorted(list(available_depts))
+                        
+                        top_n_students = st.number_input(
+                            "How many top students to display?",
+                            min_value=10, max_value=500, value=50, step=10,
+                            key="top_n_input"
+                        )
+                        
+                        selected_depts = st.multiselect(
+                            "Select Departments to Generate Report For:",
+                            options=["OVERALL"] + available_depts,
+                            default=["OVERALL"],
+                            key="dept_select"
+                        )
+                        
+                        if st.button("📊 Confirm & Generate", key="confirm_perf"):
+                            all_student_data = [] # Just for check
+                            for rep in all_final_reports:
+                                if rep['is_current'] and not rep.get('student_data', pd.DataFrame()).empty:
+                                    all_student_data.append(rep['student_data'])
+                            
+                            if all_student_data:
+                                perf_output = io.BytesIO()
+                                with pd.ExcelWriter(perf_output, engine='xlsxwriter') as perf_writer:
+                                    perf_wb = perf_writer.book
+                                    
+                                    for rep in all_final_reports:
+                                        if not rep['is_current'] or rep.get('student_data', pd.DataFrame()).empty:
+                                            continue
+                                        
+                                        student_df = rep['student_data']
+                                        
+                                        # Iterate through selections
+                                        for sel in selected_depts:
+                                            if sel == "OVERALL":
+                                                # Normal behavior: All students + Overall Ranking
+                                                perf_sheet_name = f"Perf_ALL_{rep['date']}"[:31]
+                                                pd.DataFrame([[]]).to_excel(perf_writer, index=False, sheet_name=perf_sheet_name, header=False)
+                                                ws = perf_writer.sheets[perf_sheet_name]
+                                                write_student_rankings(perf_wb, ws, student_df, int(top_n_students), 0)
+                                            else:
+                                                # Specific Dept: Filtered Data, Only that dept listing
+                                                dept_df = student_df[student_df['Branch'] == sel]
+                                                if not dept_df.empty:
+                                                    perf_sheet_name = f"Perf_{sel}_{rep['date']}"[:31]
+                                                    pd.DataFrame([[]]).to_excel(perf_writer, index=False, sheet_name=perf_sheet_name, header=False)
+                                                    ws = perf_writer.sheets[perf_sheet_name]
+                                                    write_student_rankings(perf_wb, ws, dept_df, int(top_n_students), 0)
+                                
+                                st.download_button(
+                                    label="📥 Download Performance Analysis",
+                                    data=perf_output.getvalue(),
+                                    file_name=f"Performance_Analysis_{fn_dt}.xlsx",
+                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                    key="perf_download"
+                                )
+                                st.session_state['show_perf_input'] = False
+                            else:
+                                st.warning("No student data available for performance analysis.")
+
 
         except Exception as e:
+            import traceback
             st.error(f"An error occurred: {e}")
+            st.code(traceback.format_exc())
 
 with tab2:
     st.header("History")
