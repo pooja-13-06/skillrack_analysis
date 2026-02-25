@@ -101,6 +101,26 @@ def write_formatted_sheet(workbook, worksheet, final_df, detected_date_str, year
     worksheet.set_column('B:B', 15) 
     worksheet.set_column('C:I', 15)
 
+def get_top_performers_df(student_df, top_n=50):
+    """
+    Core logic to sort and filter top performers.
+    """
+    if student_df.empty:
+        return pd.DataFrame()
+    
+    df = student_df.copy()
+    df['Solved count'] = pd.to_numeric(df['Solved count'], errors='coerce').fillna(0)
+    df['Total submissions'] = pd.to_numeric(df['Total submissions'], errors='coerce').fillna(0)
+    df['Active utilisation_seconds'] = df['Active utilisation'].apply(parse_duration_to_seconds)
+    
+    # Sort: Solved count (desc), Active utilisation (asc), Total submissions (asc)
+    ranked = df.sort_values(
+        by=['Solved count', 'Active utilisation_seconds', 'Total submissions'],
+        ascending=[False, True, True]
+    ).head(top_n).reset_index(drop=True)
+    
+    return ranked
+
 def write_student_rankings(workbook, worksheet, student_df, top_n, start_row_offset):
     """
     Write student performance rankings to the worksheet below the summary.
@@ -155,31 +175,8 @@ def write_student_rankings(workbook, worksheet, student_df, top_n, start_row_off
         ws.write(row_idx, 4, str(safe_get(row_data, 'Year')), data_fmt)
         ws.write(row_idx, 5, int(safe_get(row_data, 'Solved count', 0)), data_fmt)
         ws.write(row_idx, 6, int(safe_get(row_data, 'Total submissions', 0)), data_fmt)
-        ws.write(row_idx, 7, str(safe_get(row_data, 'Active utilisation')), data_fmt)
+        ws.write(row_idx, 7, str(safe_get(row_data, 'Active utilisation', 'N/A')), data_fmt)
 
-    # Make a clean copy and convert numeric columns safely
-    df = student_df.copy()
-    df['Solved count'] = pd.to_numeric(df['Solved count'], errors='coerce').fillna(0)
-    df['Total submissions'] = pd.to_numeric(df['Total submissions'], errors='coerce').fillna(0)
-    # Convert Active utilisation to numeric for sorting (non-numeric becomes 0)
-    # Convert Active utilisation to numeric for sorting (non-numeric becomes 0)
-    def parse_duration_to_seconds(val):
-        if pd.isna(val): return 99999999 # Treat NaNs as very large time (bottom of list)
-        val = str(val).strip()
-        try:
-            # Handle HH:MM:SS
-            parts = list(map(int, val.split(':')))
-            if len(parts) == 3:
-                return parts[0] * 3600 + parts[1] * 60 + parts[2]
-            elif len(parts) == 2:
-                return parts[0] * 60 + parts[1]
-            else:
-                return 99999999
-        except:
-             return 99999999
-
-    df['Active utilisation_seconds'] = df['Active utilisation'].apply(parse_duration_to_seconds)
-    
     headers = ["Rank", "Reg No", "Name", "Branch", "Year", "Problems Solved", "Submissions", "Active Util"]
     current_row = start_row_offset
     
@@ -190,17 +187,16 @@ def write_student_rankings(workbook, worksheet, student_df, top_n, start_row_off
         for col, header in enumerate(headers):
             ws.write(row, col, header, perf_header_fmt)
         row += 1
-        ranked = section_df.sort_values(
-            by=['Solved count', 'Active utilisation_seconds', 'Total submissions'],
-            ascending=[False, True, True]
-        ).head(top_n).reset_index(drop=True)
+        
+        ranked = get_top_performers_df(section_df, top_n)
+        
         for idx, r in ranked.iterrows():
             write_student_row(ws, row, idx + 1, r)
             row += 1
         return row + 2  # gap
 
     # --- OVERALL ---
-    current_row = write_section(worksheet, df, "OVERALL TOP PERFORMERS", current_row)
+    current_row = write_section(worksheet, student_df, "OVERALL TOP PERFORMERS", current_row)
     
     # --- BRANCH-WISE ---
     for branch in sorted(df['Branch'].unique()):
@@ -251,7 +247,7 @@ def normalize_branch(name):
     if 'MECT' in tokens: return 'MCT' # Handle MECT -> MCT mapping
     if 'BIOMED' in tokens: return 'BIOMED'
     if 'IT' in tokens: return 'IT'
-    if 'AIDS' in tokens: return 'AIDS'
+    if 'AI' in tokens: return 'AIDS'
     if 'CSBS' in tokens: return 'CSBS'
     if 'AIML' in tokens: return 'AIML'
     if 'ACT' in tokens: return 'ACT'
@@ -308,6 +304,119 @@ def normalize_year_val(val):
             if d == '4': return 'IV'
     return val
 
+# --- STATIC DATA (HARDCODED) ---
+STATIC_STRENGTH = [
+    # Second Year (II)
+    {"Branch": "CIVIL", "Year": "II", "Registered_Count": 29},
+    {"Branch": "CSE", "Year": "II", "Registered_Count": 1091},
+    {"Branch": "EEE", "Year": "II", "Registered_Count": 65},
+    {"Branch": "ECE", "Year": "II", "Registered_Count": 267},
+    {"Branch": "MECH", "Year": "II", "Registered_Count": 128},
+    {"Branch": "MCT", "Year": "II", "Registered_Count": 61},
+    {"Branch": "BIOMED", "Year": "II", "Registered_Count": 62},
+    {"Branch": "IT", "Year": "II", "Registered_Count": 193},
+    {"Branch": "AIDS", "Year": "II", "Registered_Count": 335},
+    {"Branch": "CSBS", "Year": "II", "Registered_Count": 67},
+    {"Branch": "AIML", "Year": "II", "Registered_Count": 130},
+    {"Branch": "CS", "Year": "II", "Registered_Count": 72},
+    {"Branch": "ACT", "Year": "II", "Registered_Count": 63},
+    {"Branch": "VLSI", "Year": "II", "Registered_Count": 64},
+    
+    # Third Year (III)
+    {"Branch": "CIVIL", "Year": "III", "Registered_Count": 32},
+    {"Branch": "CSE", "Year": "III", "Registered_Count": 258},
+    {"Branch": "EEE", "Year": "III", "Registered_Count": 63},
+    {"Branch": "ECE", "Year": "III", "Registered_Count": 193},
+    {"Branch": "MECH", "Year": "III", "Registered_Count": 126},
+    {"Branch": "MCT", "Year": "III", "Registered_Count": 61},
+    {"Branch": "BIOMED", "Year": "III", "Registered_Count": 63},
+    {"Branch": "IT", "Year": "III", "Registered_Count": 193},
+    {"Branch": "AIDS", "Year": "III", "Registered_Count": 163},
+    {"Branch": "CSBS", "Year": "III", "Registered_Count": 63},
+    {"Branch": "AIML", "Year": "III", "Registered_Count": 128},
+    {"Branch": "CS", "Year": "III", "Registered_Count": 63},
+    {"Branch": "ACT", "Year": "III", "Registered_Count": 60},
+    {"Branch": "VLSI", "Year": "III", "Registered_Count": 65},
+    
+    # CITAR (Third Year Only)
+    {"Branch": "CSE", "Year": "CITAR-III", "Registered_Count": 189},
+    {"Branch": "AIDS", "Year": "CITAR-III", "Registered_Count": 63},
+    {"Branch": "EEE", "Year": "CITAR-III", "Registered_Count": 59},
+    {"Branch": "ECE", "Year": "CITAR-III", "Registered_Count": 64}
+]
+
+# Column Mapping Definition
+RES_COL_MAP = {
+    'Reg No': ['regn num', 'regn no', 'reg no', 'registration number', 'regn_no', 'roll no', 'reg_no', 'student id', 'roll number', 'student registration id', 'reg_id', 'id', 'student_id'],
+    'Branch': ['branch', 'department', 'dept', 'branch name', 'major', 'discipline'],
+    'Year': ['year', 'yr', 'batch', 'year of study', 'study year', 'academic year', 'standard'],
+    'Solved count': ['solved count', 'problems solved', 'total solved', 'problems count', 'solved'],
+    'Total submissions': ['total submissions', 'total attempts', 'submission count'],
+    'Active utilisation': ['active utilisation', 'active utilization', 'active status', 'duration', 'active duration', 'active time', 'total active time', 'usage duration', 'time spent'],
+    'Name': ['name', 'student name', 'full name', 'student_name', 'fullname'],
+    'Timestamp': [
+        'timestamp', 'date', 'uploaded at', 'time', 'usage date', 'usage time', 
+        'last login', 'completion date', 'date/time', 'login time', 'submitted on', 
+        'test date', 'created at', 'start time'
+    ]
+}
+
+def parse_duration_to_seconds(val):
+    """Utility to convert HH:MM:SS or HH:MM duration strings to seconds."""
+    if pd.isna(val) or str(val).lower() in ['nan', 'n/a', '', 'none']:
+        return 99999999 # Treat NaNs as very large time (bottom of list)
+    val = str(val).strip()
+    try:
+        # Handle HH:MM:SS
+        parts = list(map(int, val.split(':')))
+        if len(parts) == 3:
+            return parts[0] * 3600 + parts[1] * 60 + parts[2]
+        elif len(parts) == 2:
+            return parts[0] * 60 + parts[1]
+        else:
+            return 99999999
+    except:
+         return 99999999
+
+def standardize_columns(df):
+    """Standardize column names for a single dataframe, handling collisions."""
+    df.columns = df.columns.str.strip()
+    
+    # Apply mapping
+    for standard, variations in RES_COL_MAP.items():
+        # Find all columns that match this standard key (including itself)
+        candidates = []
+        for col in df.columns:
+            if col.lower() in variations or col.lower() == standard.lower():
+                candidates.append(col)
+        
+        if not candidates:
+            continue
+            
+        # If multiple candidates exist (e.g. 'Reg No' is empty, 'Regn No' is full), pick the best one
+        best_col = candidates[0]
+        if len(candidates) > 1:
+            # Pick the one with the most non-null values
+            best_col = max(candidates, key=lambda c: df[c].count())
+        
+        # Rename the best candidate to standard
+        if best_col != standard:
+             df.rename(columns={best_col: standard}, inplace=True)
+        
+        # Drop other candidates to avoid confusion (if they still exist after rename)
+        other_candidates = [c for c in candidates if c != best_col and c in df.columns]
+        if other_candidates:
+            df.drop(columns=other_candidates, inplace=True)
+
+    # Fallback for Reg No specifically if missed - GREEDY SEARCH
+    if 'Reg No' not in df.columns:
+        col_map = {c.lower().strip(): c for c in df.columns}
+        for norm_col, orig_col in col_map.items():
+            if 'reg' in norm_col and 'no' in norm_col:
+                df.rename(columns={orig_col: 'Reg No'}, inplace=True)
+                break
+    return df
+
 st.set_page_config(page_title="Result Analysis Tool", layout="wide")
 
 # --- AUTHENTICATION ---
@@ -358,47 +467,6 @@ with tab1:
     uploaded_files = st.file_uploader("Upload 'Result/Usage' Files (for Appeared Count)", type=["xlsx", "xls", "csv"], key="res", accept_multiple_files=True)
 
 
-    # --- STATIC DATA (HARDCODED) ---
-    STATIC_STRENGTH = [
-        # Second Year (II)
-        {"Branch": "CIVIL", "Year": "II", "Registered_Count": 29},
-        {"Branch": "CSE", "Year": "II", "Registered_Count": 1091},
-        {"Branch": "EEE", "Year": "II", "Registered_Count": 65},
-        {"Branch": "ECE", "Year": "II", "Registered_Count": 267},
-        {"Branch": "MECH", "Year": "II", "Registered_Count": 128},
-        {"Branch": "MCT", "Year": "II", "Registered_Count": 61},
-        {"Branch": "BIOMED", "Year": "II", "Registered_Count": 62},
-        {"Branch": "IT", "Year": "II", "Registered_Count": 193},
-        {"Branch": "AIDS", "Year": "II", "Registered_Count": 335},
-        {"Branch": "CSBS", "Year": "II", "Registered_Count": 67},
-        {"Branch": "AIML", "Year": "II", "Registered_Count": 130},
-        {"Branch": "CS", "Year": "II", "Registered_Count": 72},
-        {"Branch": "ACT", "Year": "II", "Registered_Count": 63},
-        {"Branch": "VLSI", "Year": "II", "Registered_Count": 64},
-        
-        # Third Year (III)
-        {"Branch": "CIVIL", "Year": "III", "Registered_Count": 32},
-        {"Branch": "CSE", "Year": "III", "Registered_Count": 258},
-        {"Branch": "EEE", "Year": "III", "Registered_Count": 63},
-        {"Branch": "ECE", "Year": "III", "Registered_Count": 193},
-        {"Branch": "MECH", "Year": "III", "Registered_Count": 126},
-        {"Branch": "MCT", "Year": "III", "Registered_Count": 61},
-        {"Branch": "BIOMED", "Year": "III", "Registered_Count": 63},
-        {"Branch": "IT", "Year": "III", "Registered_Count": 193},
-        {"Branch": "AIDS", "Year": "III", "Registered_Count": 163},
-        {"Branch": "CSBS", "Year": "III", "Registered_Count": 63},
-        {"Branch": "AIML", "Year": "III", "Registered_Count": 128},
-        {"Branch": "CS", "Year": "III", "Registered_Count": 63},
-        {"Branch": "ACT", "Year": "III", "Registered_Count": 60},
-        {"Branch": "VLSI", "Year": "III", "Registered_Count": 65},
-        
-        # CITAR (Third Year Only)
-        {"Branch": "CSE", "Year": "CITAR-III", "Registered_Count": 189},
-        {"Branch": "AIDS", "Year": "CITAR-III", "Registered_Count": 63},
-        {"Branch": "EEE", "Year": "CITAR-III", "Registered_Count": 59},
-        {"Branch": "ECE", "Year": "CITAR-III", "Registered_Count": 64}
-    ]
-
     if uploaded_files:
         try:
             # --- USE STATIC DATA FOR REGISTERED COUNTS ---
@@ -408,61 +476,6 @@ with tab1:
             all_dfs = []
             seen_names = set()
             processed_files_names = []
-
-            # Column Mapping Definition
-            res_col_map = {
-                'Reg No': ['regn num', 'regn no', 'reg no', 'registration number', 'regn_no', 'roll no', 'reg_no', 'student id', 'roll number', 'student registration id', 'reg_id', 'id', 'student_id'],
-                'Branch': ['branch', 'department', 'dept', 'branch name', 'major', 'discipline'],
-                'Year': ['year', 'yr', 'batch', 'year of study', 'study year', 'academic year', 'standard'],
-                'Solved count': ['solved count', 'problems solved', 'total solved', 'problems count', 'solved'],
-                'Total submissions': ['total submissions', 'total attempts', 'submission count'],
-                'Active utilisation': ['active utilisation', 'active utilization', 'active status'],
-                'Name': ['name', 'student name', 'full name', 'student_name', 'fullname'],
-                'Timestamp': [
-                    'timestamp', 'date', 'uploaded at', 'time', 'usage date', 'usage time', 
-                    'last login', 'completion date', 'date/time', 'login time', 'submitted on', 
-                    'test date', 'created at', 'start time'
-                ]
-            }
-
-            def standardize_columns(df):
-                """Standardize column names for a single dataframe, handling collisions."""
-                df.columns = df.columns.str.strip()
-                
-                # Apply mapping
-                for standard, variations in res_col_map.items():
-                    # Find all columns that match this standard key (including itself)
-                    candidates = []
-                    for col in df.columns:
-                        if col.lower() in variations or col.lower() == standard.lower():
-                            candidates.append(col)
-                    
-                    if not candidates:
-                        continue
-                        
-                    # If multiple candidates exist (e.g. 'Reg No' is empty, 'Regn No' is full), pick the best one
-                    best_col = candidates[0]
-                    if len(candidates) > 1:
-                        # Pick the one with the most non-null values
-                        best_col = max(candidates, key=lambda c: df[c].count())
-                    
-                    # Rename the best candidate to standard
-                    if best_col != standard:
-                         df.rename(columns={best_col: standard}, inplace=True)
-                    
-                    # Drop other candidates to avoid confusion (if they still exist after rename)
-                    other_candidates = [c for c in candidates if c != best_col and c in df.columns]
-                    if other_candidates:
-                        df.drop(columns=other_candidates, inplace=True)
-
-                # Fallback for Reg No specifically if missed - GREEDY SEARCH
-                if 'Reg No' not in df.columns:
-                    col_map = {c.lower().strip(): c for c in df.columns}
-                    for norm_col, orig_col in col_map.items():
-                        if 'reg' in norm_col and 'no' in norm_col:
-                            df.rename(columns={orig_col: 'Reg No'}, inplace=True)
-                            break
-                return df
 
             for res_file in uploaded_files:
                 if res_file.name in seen_names:
@@ -750,6 +763,178 @@ with tab1:
                                 st.session_state['show_perf_input'] = False
                             else:
                                 st.warning("No student data available for performance analysis.")
+                
+                # --- LIVE PERFORMANCE DASHBOARD ---
+                st.divider()
+                st.header("🏆 Live Performance Dashboard")
+                
+                # Collect student data from all current reports
+                all_current_student_data = pd.concat([
+                    rep['student_data'] for rep in all_final_reports 
+                    if rep['is_current'] and not rep.get('student_data', pd.DataFrame()).empty
+                ], ignore_index=True) if any(
+                    rep['is_current'] and not rep.get('student_data', pd.DataFrame()).empty 
+                    for rep in all_final_reports
+                ) else pd.DataFrame()
+
+                if not all_current_student_data.empty:
+                    p_col1, p_col2, p_col3 = st.columns([1, 1, 1])
+                    with p_col1:
+                        view_mode = st.radio("Select View Mode", ["Overall", "Department-wise"], horizontal=True)
+                    
+                    available_depts = sorted(all_current_student_data['Branch'].unique().tolist())
+                    
+                    selected_view_dept = "OVERALL"
+                    if view_mode == "Department-wise":
+                        with p_col2:
+                            selected_view_dept = st.selectbox("Select Department", available_depts)
+                    
+                    with p_col3:
+                        top_n_live = st.slider("Show Top N Students", 5, 100, 20)
+                    
+                    # Filter and Display
+                    if selected_view_dept == "OVERALL":
+                        display_df = all_current_student_data
+                        title = f"Top {top_n_live} Performers - Overall"
+                    else:
+                        display_df = all_current_student_data[all_current_student_data['Branch'] == selected_view_dept]
+                        title = f"Top {top_n_live} Performers - {selected_view_dept}"
+                    
+                    ranked_live = get_top_performers_df(display_df, top_n_live)
+                    
+                    if not ranked_live.empty:
+                        st.subheader(title)
+                        # Add Rank column for display
+                        ranked_live.insert(0, 'Rank', range(1, len(ranked_live) + 1))
+                        
+                        # Select relevant columns for UI display
+                        ui_cols = ['Rank', 'Reg No', 'Name', 'Branch', 'Year', 'Solved count', 'Total submissions', 'Active utilisation']
+                        st.dataframe(ranked_live[ui_cols], use_container_width=True, hide_index=True)
+                        
+                        # Visual chart
+                        st.write("#### Problems Solved Visualization")
+                        st.bar_chart(ranked_live.set_index('Name')['Solved count'])
+                    else:
+                        st.info("No data found for the selected criteria.")
+                else:
+                    st.info("Upload files to see the live performance dashboard.")
+                
+                with col2:
+                    if st.button("📊 Show Aggregated Overall Performance"):
+                        st.session_state['show_weekly_analysis'] = True
+                
+                if st.session_state.get('show_weekly_analysis', False):
+                    st.divider()
+                    st.subheader("📅 Aggregated Overall Performance Analysis")
+                    
+                    # --- AGGREGATION LOGIC ---
+                    df_agg = df_res.copy()
+                    df_agg['Branch'] = df_agg['Branch'].apply(normalize_branch)
+                    df_agg['Year'] = df_agg['Year'].astype(str).replace(r'\.0$', '', regex=True).apply(normalize_year_val)
+                    df_agg['Solved count'] = pd.to_numeric(df_agg['Solved count'], errors='coerce').fillna(0).astype(int)
+                    
+                    if 'Timestamp' in df_agg.columns:
+                        df_agg['Derived_Date'] = df_agg['Timestamp'].apply(extract_date_from_val)
+                    else:
+                        df_agg['Derived_Date'] = "Unknown"
+                    
+                    if 'Total submissions' not in df_agg.columns:
+                        df_agg['Total submissions'] = 0
+                    if 'Active utilisation' not in df_agg.columns:
+                        df_agg['Active utilisation'] = '00:00:00'
+                    
+                    df_agg['Active utilisation_seconds'] = df_agg['Active utilisation'].apply(parse_duration_to_seconds)
+                    df_agg['Active_Secs_Agg'] = df_agg['Active utilisation_seconds'].replace(99999999, 0)
+                    
+                    has_reg = 'Reg No' in df_agg.columns
+                    id_col = 'Reg No' if has_reg else 'Name'
+
+                    # Clean Date Grouping (Student-Day level)
+                    daily_student = df_agg.groupby([id_col, 'Derived_Date']).agg({
+                        'Solved count': 'max',
+                        'Total submissions': 'max',
+                        'Active_Secs_Agg': 'max', 
+                        'Branch': 'first',
+                        'Year': 'first',
+                        'Name': 'first' if has_reg else 'last'
+                    }).reset_index()
+                    
+                    # Aggregation across all files
+                    aggregated_grouped = daily_student.groupby(id_col).agg({
+                        'Derived_Date': 'nunique',
+                        'Solved count': 'sum',
+                        'Total submissions': 'sum',
+                        'Active_Secs_Agg': 'sum', 
+                        'Branch': 'first',
+                        'Year': 'first',
+                        'Name': 'first' if has_reg else 'last'
+                    }).reset_index()
+                    
+                    # Formatting
+                    def format_seconds_to_hhmmss(s):
+                        if s <= 0: return "00:00:00"
+                        h = s // 3600
+                        m = (s % 3600) // 60
+                        s = s % 60
+                        return f"{int(h):02d}:{int(m):02d}:{int(s):02d}"
+
+                    aggregated_grouped['Total Active Util'] = aggregated_grouped['Active_Secs_Agg'].apply(format_seconds_to_hhmmss)
+                    aggregated_grouped.columns = [id_col, 'Days Appeared', 'Total Solved', 'Total Submissions', 'Active_Secs_Total', 'Branch', 'Year', 'Name', 'Total Active Util']
+                    
+                    # --- UI CONTROLS FOR AGGREGATED VIEW ---
+                    a_col1, a_col2, a_col3 = st.columns([1, 1, 1])
+                    with a_col1:
+                        agg_view_mode = st.radio("Agg View Mode", ["Overall", "Department-wise"], horizontal=True, key="agg_mode")
+                    
+                    available_depts_agg = sorted(aggregated_grouped['Branch'].unique().tolist())
+                    
+                    selected_agg_dept = "OVERALL"
+                    if agg_view_mode == "Department-wise":
+                        with a_col2:
+                            selected_agg_dept = st.selectbox("Select Department", available_depts_agg, key="agg_dept_sel")
+                    
+                    with a_col3:
+                        top_n_agg = st.slider("Show Top N Students", 10, 500, 50, key="agg_slider")
+
+                    # Filter
+                    if selected_agg_dept == "OVERALL":
+                        df_to_display = aggregated_grouped
+                    else:
+                        df_to_display = aggregated_grouped[aggregated_grouped['Branch'] == selected_agg_dept]
+
+                    # Sort: Total Solved (Desc) then Total Submissions (Asc)
+                    sorted_agg = df_to_display.sort_values(
+                        by=['Total Solved', 'Total Submissions'],
+                        ascending=[False, True]
+                    ).head(top_n_agg).reset_index(drop=True)
+                    
+                    # Add Rank
+                    sorted_agg.insert(0, 'Rank', range(1, len(sorted_agg) + 1))
+
+                    display_cols = ['Rank', id_col, 'Name', 'Branch', 'Year', 'Days Appeared', 'Total Solved', 'Total Submissions', 'Total Active Util']
+                    st.dataframe(sorted_agg[display_cols], use_container_width=True, hide_index=True)
+                    
+                    # Visualization
+                    st.write("#### Aggregated Problems Solved Visualization")
+                    st.bar_chart(sorted_agg.set_index('Name')['Total Solved'])
+                    
+                    st.divider()
+                    
+                    # Export
+                    ag_output = io.BytesIO()
+                    with pd.ExcelWriter(ag_output, engine='xlsxwriter') as ag_writer:
+                        sorted_agg[display_cols].to_excel(ag_writer, index=False, sheet_name='Aggregated Overall Report')
+                    
+                    st.download_button(
+                        label="📥 Download Aggregated Overall Report (Excel)",
+                        data=ag_output.getvalue(),
+                        file_name=f"Aggregated_Overall_Analysis_{fn_dt}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    )
+                    
+                    if st.button("Close Aggregated View"):
+                        st.session_state['show_weekly_analysis'] = False
+                        st.rerun()
 
 
         except Exception as e:
@@ -803,3 +988,4 @@ with tab2:
         st.divider()
         st.write("#### Full History Log")
         st.dataframe(history_df[['id', 'timestamp', 'analysis_date', 'res_filename', 'total_students']])
+
